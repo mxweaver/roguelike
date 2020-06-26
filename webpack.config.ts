@@ -62,6 +62,12 @@ const config: Configuration = {
           'sass-loader',
         ],
       },
+      {
+        test: /\.bmp$/,
+        use: [
+          'url-loader',
+        ],
+      },
     ],
   },
   plugins: [
