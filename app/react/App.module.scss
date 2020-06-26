@@ -1,0 +1,11 @@
+.container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inner {
+  cursor: none;
+  border: 2px solid black;
+}
