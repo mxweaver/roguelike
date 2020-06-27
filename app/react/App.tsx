@@ -11,16 +11,46 @@ import jimp from 'jimp';
 import useEventListener from '@use-it/event-listener';
 import useInterval from '@use-it/interval';
 import boardFileData from '../data/board.bmp';
+import spriteFileData from '../data/sprites.bmp';
 import c from './App.module.scss';
 
-const CANVAS_WIDTH = 1024;
-const CANVAS_HEIGHT = 1024;
 const BOARD_WIDTH = 100;
 const BOARD_HEIGHT = 100;
 const FRAME_WIDTH = 64;
 const FRAME_HEIGHT = 64;
-const PIECE_WIDTH = CANVAS_WIDTH / FRAME_WIDTH;
-const PIECE_HEIGHT = CANVAS_HEIGHT / FRAME_HEIGHT;
+const PIECE_WIDTH = 16;
+const PIECE_HEIGHT = 16;
+const CANVAS_WIDTH = FRAME_WIDTH * PIECE_WIDTH;
+const CANVAS_HEIGHT = FRAME_HEIGHT * PIECE_HEIGHT;
+
+const SPRITE_PLAYER = {
+  x: 0,
+  y: 0,
+};
+
+const SPRITE_MONSTER = {
+  x: 1,
+  y: 0,
+};
+
+const SPRITE_SWORD = {
+  x: 2,
+  y: 0,
+};
+
+const SPRITE_WALL = {
+  x: 3,
+  y: 0,
+};
+
+const SPRITE_PLAYER_LEFT = 0 * PIECE_WIDTH;
+const SPRITE_PLAYER_TOP = 0 * PIECE_HEIGHT;
+const SPRITE_MONSTER_LEFT = 1 * PIECE_WIDTH;
+const SPRITE_MONSTER_TOP = 0 * PIECE_HEIGHT;
+const SPRITE_SWORD_LEFT = 2 * PIECE_WIDTH;
+const SPRITE_SWORD_TOP = 0 * PIECE_HEIGHT;
+const SPRITE_WALL_LEFT = 3 * PIECE_WIDTH;
+const SPRITE_WALL_TOP = 0 * PIECE_HEIGHT;
 
 enum Direction {
   Up = 0,
@@ -41,9 +71,7 @@ interface Coordinate {
   y: number;
 }
 
-interface Entity {
-  x: number;
-  y: number;
+interface Entity extends Coordinate {
   direction: Direction;
   attacking?: boolean;
   moving?: boolean;
@@ -60,7 +88,13 @@ interface Game {
   step: number;
   player: Entity;
   monsters: Entity[];
-  board: Board;
+  board?: Board;
+}
+
+interface RenderContext {
+  context: CanvasRenderingContext2D,
+  sprites: HTMLImageElement,
+  frame: Coordinate,
 }
 
 function getAttackingCoordinate(entity: Entity): Coordinate {
@@ -90,7 +124,7 @@ function getAttackingCoordinate(entity: Entity): Coordinate {
   return attackingCoordinate;
 }
 
-function moveEntity(entity: Entity, board: Board) {
+function moveEntity(game: Game, entity: Entity) {
   if (!entity.moving) {
     return entity;
   }
@@ -100,7 +134,11 @@ function moveEntity(entity: Entity, board: Board) {
   nextCoordinate.x = _.clamp(nextCoordinate.x, 0, BOARD_WIDTH - 1);
   nextCoordinate.y = _.clamp(nextCoordinate.y, 0, BOARD_HEIGHT - 1);
 
-  if (board[nextCoordinate.y][nextCoordinate.x] === Piece.Empty) {
+  const isPieceEmpty = game.board[nextCoordinate.y][nextCoordinate.x] === Piece.Empty;
+  const isPiecePlayer = game.player.x === nextCoordinate.x && game.player.y === nextCoordinate.y;
+  const isPieceMonster = game.monsters.some((monster) => nextCoordinate.x === monster.x && nextCoordinate.y === monster.y);
+
+  if (isPieceEmpty && !isPiecePlayer && !isPieceMonster) {
     return {
       ...entity,
       ...nextCoordinate,
@@ -118,9 +156,13 @@ function tick(game: Game): Game {
     monsters,
   } = game;
 
+  if (!board) {
+    return game;
+  }
+
   const newGame = _.clone(game);
 
-  newGame.player = moveEntity(player, board);
+  newGame.player = moveEntity(game, player);
 
   // kill monsters
   if (player.attacking) {
@@ -130,10 +172,10 @@ function tick(game: Game): Game {
 
   // move monsters
   if (step % 10 === 0) {
-    newGame.monsters = newGame.monsters.map((monster) => {
-      const newMonster = { ...monster, direction: _.sample(directions) };
-      return moveEntity(newMonster, board);
-    });
+    newGame.monsters = newGame.monsters.map((monster) => moveEntity(game, {
+      ...monster,
+      direction: _.sample(directions),
+    }));
   }
 
   // step
@@ -142,50 +184,84 @@ function tick(game: Game): Game {
   return newGame;
 }
 
-function render(canvas: HTMLCanvasElement, game: Game): void {
-  const { player, board, monsters } = game;
+function renderSprite(
+  context: RenderContext,
+  sprite: Coordinate,
+  destination: Coordinate,
+): void {
+  context.context.drawImage(
+    context.sprites,
+    sprite.x * PIECE_WIDTH,
+    sprite.y * PIECE_WIDTH,
+    PIECE_WIDTH,
+    PIECE_HEIGHT,
+    (destination.x - context.frame.x) * PIECE_WIDTH,
+    (destination.y - context.frame.y) * PIECE_HEIGHT,
+    PIECE_WIDTH,
+    PIECE_HEIGHT,
+  );
+}
 
-  const context = canvas.getContext('2d');
-
-  const frameLeft = _.clamp(player.x - FRAME_WIDTH / 2, 0, BOARD_WIDTH - FRAME_WIDTH);
-  const frameTop = _.clamp(player.y - FRAME_WIDTH / 2, 0, BOARD_HEIGHT - FRAME_HEIGHT);
-
-  // clear buffer
-  context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-  // render board
-  context.fillStyle = 'black';
-  for (let y = frameTop; y < frameTop + FRAME_HEIGHT; y += 1) {
-    for (let x = frameLeft; x < frameLeft + FRAME_WIDTH; x += 1) {
+function renderBoard(context: RenderContext, board: Board) {
+  for (let { y } = context.frame; y < context.frame.y + FRAME_HEIGHT; y += 1) {
+    for (let { x } = context.frame; x < context.frame.x + FRAME_WIDTH; x += 1) {
       const piece = board[y][x];
+
       if (piece === Piece.Wall) {
-        context.fillRect((x - frameLeft) * PIECE_WIDTH, (y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+        renderSprite(context, SPRITE_WALL, { x, y });
       }
     }
   }
+}
 
-  // render player
-  context.fillStyle = 'green';
-  context.fillRect((player.x - frameLeft) * PIECE_WIDTH, (player.y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
-
-  // render sword
-  if (player.attacking) {
-    const sword = getAttackingCoordinate(player);
-
-    context.fillStyle = 'blue';
-    context.fillRect((sword.x - frameLeft) * PIECE_WIDTH, (sword.y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+function render(
+  canvas: HTMLCanvasElement,
+  game: Game,
+  sprites?: HTMLImageElement,
+): void {
+  if (!sprites) {
+    return;
   }
 
-  // render monsters
-  context.fillStyle = 'red';
+  if (!game.board) {
+    return;
+  }
+
+  const { player, board, monsters } = game;
+
+  const context = {
+    context: canvas.getContext('2d'),
+    frame: {
+      x: _.clamp(player.x - FRAME_WIDTH / 2, 0, BOARD_WIDTH - FRAME_WIDTH),
+      y: _.clamp(player.y - FRAME_WIDTH / 2, 0, BOARD_HEIGHT - FRAME_HEIGHT),
+    },
+    sprites,
+  };
+
+  // clear buffer
+  context.context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  renderBoard(context, board);
+  renderSprite(context, SPRITE_PLAYER, player);
+
   monsters.forEach((monster) => {
-    context.fillRect(
-      (monster.x - frameLeft) * PIECE_WIDTH,
-      (monster.y - frameTop) * PIECE_HEIGHT,
-      PIECE_WIDTH,
-      PIECE_HEIGHT,
-    );
+    renderSprite(context, SPRITE_MONSTER, monster);
   });
+
+  if (player.attacking) {
+    renderSprite(context, SPRITE_SWORD, getAttackingCoordinate(player));
+  }
+
+  // render sword
+  // if (player.attacking) {
+  //   const sword = getAttackingCoordinate(player);
+
+  //   context.fillStyle = 'blue';
+  //   context.fillRect((sword.x - frameLeft) * PIECE_WIDTH, (sword.y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+  // }
+
+  // render monsters
+  // context.fillStyle = 'red';
 }
 
 enum PieceFileColors {
@@ -193,16 +269,12 @@ enum PieceFileColors {
   Wall = 0xff0000ff,
 }
 
-const initialBoard = new Array(BOARD_HEIGHT)
-  .fill(undefined)
-  .map(() => new Array(BOARD_WIDTH).fill(Piece.Empty));
-
 export default function App() {
   const [game, setGame] = useState<Game>({
     step: 0,
     player: {
-      x: 0,
-      y: 0,
+      x: 5,
+      y: 5,
       direction: Direction.Up,
     },
     monsters: [
@@ -213,8 +285,9 @@ export default function App() {
         moving: true,
       },
     ],
-    board: initialBoard,
   });
+
+  const [sprites, setSprites] = useState<HTMLImageElement | undefined>();
 
   const viewCanvasRef = useRef<HTMLCanvasElement>();
 
@@ -287,7 +360,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    const boardCopy = _.cloneDeep(game.board);
+    const board = new Array(BOARD_HEIGHT)
+      .fill(undefined)
+      .map(() => new Array(BOARD_WIDTH));
 
     jimp.read(boardFileData).then((image) => {
       for (let x = 0; x < image.bitmap.width; x += 1) {
@@ -295,9 +370,10 @@ export default function App() {
           const color = image.getPixelColor(x, y);
           switch (color) {
             case PieceFileColors.Wall:
-              boardCopy[y][x] = Piece.Wall;
+              board[y][x] = Piece.Wall;
               break;
             default:
+              board[y][x] = Piece.Empty;
               // do nothing
               break;
           }
@@ -306,16 +382,22 @@ export default function App() {
 
       setGame({
         ...game,
-        board: boardCopy,
+        board,
       });
     });
   }, []);
 
   useEffect(() => {
-    render(viewCanvasRef.current, game);
-  }, [game]);
+    render(viewCanvasRef.current, game, sprites);
+  }, [viewCanvasRef, game, sprites]);
 
   useInterval(() => setGame(tick(game)), 100);
+
+  useEffect(() => {
+    const image = new Image(1024, 1024);
+    image.src = spriteFileData;
+    image.onload = () => setSprites(image);
+  }, []);
 
   return (
     <div className={c.container}>
