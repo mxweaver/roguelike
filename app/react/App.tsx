@@ -13,12 +13,14 @@ import useInterval from '@use-it/interval';
 import boardFileData from '../data/board.bmp';
 import c from './App.module.scss';
 
-const CANVAS_WIDTH = 600;
-const CANVAS_HEIGHT = 600;
+const CANVAS_WIDTH = 1024;
+const CANVAS_HEIGHT = 1024;
 const BOARD_WIDTH = 100;
 const BOARD_HEIGHT = 100;
-const PIECE_WIDTH = CANVAS_WIDTH / BOARD_WIDTH;
-const PIECE_HEIGHT = CANVAS_HEIGHT / BOARD_HEIGHT;
+const FRAME_WIDTH = 64;
+const FRAME_HEIGHT = 64;
+const PIECE_WIDTH = CANVAS_WIDTH / FRAME_WIDTH;
+const PIECE_HEIGHT = CANVAS_HEIGHT / FRAME_HEIGHT;
 
 enum Direction {
   Up = 0,
@@ -95,11 +97,10 @@ function moveEntity(entity: Entity, board: Board) {
 
   const nextCoordinate = getAttackingCoordinate(entity);
 
-  if (
-    nextCoordinate.x >= 0 && nextCoordinate.y <= BOARD_WIDTH
-    && nextCoordinate.y >= 0 && nextCoordinate.y <= BOARD_HEIGHT
-    && board[nextCoordinate.y][nextCoordinate.x] === Piece.Empty
-  ) {
+  nextCoordinate.x = _.clamp(nextCoordinate.x, 0, BOARD_WIDTH - 1);
+  nextCoordinate.y = _.clamp(nextCoordinate.y, 0, BOARD_HEIGHT - 1);
+
+  if (board[nextCoordinate.y][nextCoordinate.x] === Piece.Empty) {
     return {
       ...entity,
       ...nextCoordinate,
@@ -143,39 +144,44 @@ function tick(game: Game): Game {
 
 function render(canvas: HTMLCanvasElement, game: Game): void {
   const { player, board, monsters } = game;
+
   const context = canvas.getContext('2d');
+
+  const frameLeft = _.clamp(player.x - FRAME_WIDTH / 2, 0, BOARD_WIDTH - FRAME_WIDTH);
+  const frameTop = _.clamp(player.y - FRAME_WIDTH / 2, 0, BOARD_HEIGHT - FRAME_HEIGHT);
 
   // clear buffer
   context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
   // render board
   context.fillStyle = 'black';
-  board.forEach((row, y) => {
-    row.forEach((piece, x) => {
+  for (let y = frameTop; y < frameTop + FRAME_HEIGHT; y += 1) {
+    for (let x = frameLeft; x < frameLeft + FRAME_WIDTH; x += 1) {
+      const piece = board[y][x];
       if (piece === Piece.Wall) {
-        context.fillRect(x * PIECE_WIDTH, y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+        context.fillRect((x - frameLeft) * PIECE_WIDTH, (y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
       }
-    });
-  });
+    }
+  }
 
   // render player
   context.fillStyle = 'green';
-  context.fillRect(player.x * PIECE_WIDTH, player.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+  context.fillRect((player.x - frameLeft) * PIECE_WIDTH, (player.y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
 
   // render sword
   if (player.attacking) {
     const sword = getAttackingCoordinate(player);
 
     context.fillStyle = 'blue';
-    context.fillRect(sword.x * PIECE_WIDTH, sword.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+    context.fillRect((sword.x - frameLeft) * PIECE_WIDTH, (sword.y - frameTop) * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
   }
 
   // render monsters
   context.fillStyle = 'red';
   monsters.forEach((monster) => {
     context.fillRect(
-      monster.x * PIECE_WIDTH,
-      monster.y * PIECE_HEIGHT,
+      (monster.x - frameLeft) * PIECE_WIDTH,
+      (monster.y - frameTop) * PIECE_HEIGHT,
       PIECE_WIDTH,
       PIECE_HEIGHT,
     );
