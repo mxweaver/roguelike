@@ -125,8 +125,6 @@ export default function App() {
     });
   }, []);
 
-  console.log(board);
-
   useEffect(() => {
     const context = viewCanvasRef.current.getContext('2d');
 
