@@ -29,21 +29,19 @@ enum PieceFileColors {
   Wall = 0xff0000ff,
 }
 
-const initialBoard = {
-  pieces: new Array(BOARD_HEIGHT)
-    .fill(undefined)
-    .map(() => new Array(BOARD_WIDTH).fill(Piece.Empty)),
-};
+const initialBoard = new Array(BOARD_HEIGHT)
+  .fill(undefined)
+  .map(() => new Array(BOARD_WIDTH).fill(Piece.Empty));
 
 for (let y = 10; y <= 20; y += 1) {
   for (let x = 10; x <= 20; x += 1) {
     if (x === 10 || x === 20 || y === 10 || y === 20) {
-      initialBoard.pieces[y][x] = Piece.Wall;
+      initialBoard[y][x] = Piece.Wall;
     }
   }
 }
 
-initialBoard.pieces[10][15] = Piece.Empty;
+initialBoard[10][15] = Piece.Empty;
 
 export default function App() {
   const [player, setPlayer] = useState({
@@ -52,7 +50,6 @@ export default function App() {
   });
 
   const [board, setBoard] = useState(initialBoard);
-  const [boardLoading, setBoardLoading] = useState(true);
 
   const viewCanvasRef = useRef<HTMLCanvasElement>();
 
@@ -63,7 +60,7 @@ export default function App() {
     if (
       newX >= 0 && newX <= BOARD_WIDTH
         && newY >= 0 && newY <= BOARD_HEIGHT
-        && board.pieces[newY][newX] === Piece.Empty
+        && board[newY][newX] === Piece.Empty
     ) {
       setPlayer({
         x: newX,
@@ -90,7 +87,7 @@ export default function App() {
         movePlayer(-1, 0);
         break;
       case Keys.ArrowUp:
-        movePlayer(1, 0);
+        movePlayer(0, -1);
         break;
       case Keys.ArrowRight:
         movePlayer(1, 0);
@@ -107,24 +104,6 @@ export default function App() {
   useEventListener('keydown', handleKeyDown);
 
   useEffect(() => {
-    const context = viewCanvasRef.current.getContext('2d');
-
-    context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    context.fillStyle = 'green';
-    board.pieces.forEach((row, y) => {
-      row.forEach((piece, x) => {
-        if (piece === Piece.Wall) {
-          context.fillRect(x * PIECE_WIDTH, y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
-        }
-      });
-    });
-
-    context.fillStyle = 'black';
-    context.fillRect(player.x * PIECE_WIDTH, player.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
-  }, [player, boardLoading]);
-
-  useEffect(() => {
     const boardCopy = _.cloneDeep(board);
 
     jimp.read(boardFileData).then((image) => {
@@ -133,7 +112,7 @@ export default function App() {
           const color = image.getPixelColor(x, y);
           switch (color) {
             case PieceFileColors.Wall:
-              boardCopy.pieces[y][x] = Piece.Wall;
+              boardCopy[y][x] = Piece.Wall;
               break;
             default:
               // do nothing
@@ -141,11 +120,33 @@ export default function App() {
           }
         }
       }
+
+      setBoard(boardCopy);
+    });
+  }, []);
+
+  console.log(board);
+
+  useEffect(() => {
+    const context = viewCanvasRef.current.getContext('2d');
+
+    // clear buffer
+    context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // render board
+    context.fillStyle = 'black';
+    board.forEach((row, y) => {
+      row.forEach((piece, x) => {
+        if (piece === Piece.Wall) {
+          context.fillRect(x * PIECE_WIDTH, y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+        }
+      });
     });
 
-    setBoard(boardCopy);
-    setBoardLoading(false);
-  }, []);
+    // render player
+    context.fillStyle = 'green';
+    context.fillRect(player.x * PIECE_WIDTH, player.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+  }, [player, board]);
 
   return (
     <div className={c.container}>
