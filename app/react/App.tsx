@@ -9,6 +9,7 @@ import _ from 'lodash';
 import { Keys } from 'keyboard-cat';
 import jimp from 'jimp';
 import useEventListener from '@use-it/event-listener';
+import useInterval from '@use-it/interval';
 import boardFileData from '../data/board.bmp';
 import c from './App.module.scss';
 
@@ -19,9 +20,166 @@ const BOARD_HEIGHT = 100;
 const PIECE_WIDTH = CANVAS_WIDTH / BOARD_WIDTH;
 const PIECE_HEIGHT = CANVAS_HEIGHT / BOARD_HEIGHT;
 
+enum Direction {
+  Up = 0,
+  Right,
+  Down,
+  Left,
+}
+
+const directions = [
+  Direction.Up,
+  Direction.Right,
+  Direction.Down,
+  Direction.Left,
+];
+
+interface Coordinate {
+  x: number;
+  y: number;
+}
+
+interface Entity {
+  x: number;
+  y: number;
+  direction: Direction;
+  attacking?: boolean;
+  moving?: boolean;
+}
+
 enum Piece {
   Empty = 0,
   Wall = 1 << 0,
+}
+
+type Board = Piece[][];
+
+interface Game {
+  step: number;
+  player: Entity;
+  monsters: Entity[];
+  board: Board;
+}
+
+function getAttackingCoordinate(entity: Entity): Coordinate {
+  const attackingCoordinate = {
+    x: entity.x,
+    y: entity.y,
+  };
+
+  switch (entity.direction) {
+    case Direction.Up:
+      attackingCoordinate.y -= 1;
+      break;
+    case Direction.Right:
+      attackingCoordinate.x += 1;
+      break;
+    case Direction.Down:
+      attackingCoordinate.y += 1;
+      break;
+    case Direction.Left:
+      attackingCoordinate.x -= 1;
+      break;
+    default:
+      // do nothing
+      break;
+  }
+
+  return attackingCoordinate;
+}
+
+function moveEntity(entity: Entity, board: Board) {
+  if (!entity.moving) {
+    return entity;
+  }
+
+  const nextCoordinate = getAttackingCoordinate(entity);
+
+  if (
+    nextCoordinate.x >= 0 && nextCoordinate.y <= BOARD_WIDTH
+    && nextCoordinate.y >= 0 && nextCoordinate.y <= BOARD_HEIGHT
+    && board[nextCoordinate.y][nextCoordinate.x] === Piece.Empty
+  ) {
+    return {
+      ...entity,
+      ...nextCoordinate,
+    };
+  }
+
+  return entity;
+}
+
+function tick(game: Game): Game {
+  const {
+    step,
+    player,
+    board,
+    monsters,
+  } = game;
+
+  const newGame = _.clone(game);
+
+  newGame.player = moveEntity(player, board);
+
+  // kill monsters
+  if (player.attacking) {
+    const sword = getAttackingCoordinate(player);
+    newGame.monsters = _.reject(monsters, (monster) => monster.x === sword.x && monster.y === sword.y);
+  }
+
+  // move monsters
+  if (step % 10 === 0) {
+    newGame.monsters = newGame.monsters.map((monster) => {
+      const newMonster = { ...monster, direction: _.sample(directions) };
+      return moveEntity(newMonster, board);
+    });
+  }
+
+  // step
+  newGame.step += 1;
+
+  return newGame;
+}
+
+function render(canvas: HTMLCanvasElement, game: Game): void {
+  const { player, board, monsters } = game;
+  const context = canvas.getContext('2d');
+
+  // clear buffer
+  context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // render board
+  context.fillStyle = 'black';
+  board.forEach((row, y) => {
+    row.forEach((piece, x) => {
+      if (piece === Piece.Wall) {
+        context.fillRect(x * PIECE_WIDTH, y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+      }
+    });
+  });
+
+  // render player
+  context.fillStyle = 'green';
+  context.fillRect(player.x * PIECE_WIDTH, player.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+
+  // render sword
+  if (player.attacking) {
+    const sword = getAttackingCoordinate(player);
+
+    context.fillStyle = 'blue';
+    context.fillRect(sword.x * PIECE_WIDTH, sword.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
+  }
+
+  // render monsters
+  context.fillStyle = 'red';
+  monsters.forEach((monster) => {
+    context.fillRect(
+      monster.x * PIECE_WIDTH,
+      monster.y * PIECE_HEIGHT,
+      PIECE_WIDTH,
+      PIECE_HEIGHT,
+    );
+  });
 }
 
 enum PieceFileColors {
@@ -33,48 +191,39 @@ const initialBoard = new Array(BOARD_HEIGHT)
   .fill(undefined)
   .map(() => new Array(BOARD_WIDTH).fill(Piece.Empty));
 
-for (let y = 10; y <= 20; y += 1) {
-  for (let x = 10; x <= 20; x += 1) {
-    if (x === 10 || x === 20 || y === 10 || y === 20) {
-      initialBoard[y][x] = Piece.Wall;
-    }
-  }
-}
-
-initialBoard[10][15] = Piece.Empty;
-
 export default function App() {
-  const [player, setPlayer] = useState({
-    x: 0,
-    y: 0,
+  const [game, setGame] = useState<Game>({
+    step: 0,
+    player: {
+      x: 0,
+      y: 0,
+      direction: Direction.Up,
+    },
+    monsters: [
+      {
+        x: 0,
+        y: 0,
+        direction: Direction.Up,
+        moving: true,
+      },
+    ],
+    board: initialBoard,
   });
-
-  const [board, setBoard] = useState(initialBoard);
 
   const viewCanvasRef = useRef<HTMLCanvasElement>();
 
-  const movePlayer = useCallback((deltaX: number, deltaY: number): void => {
-    const newX = player.x + deltaX;
-    const newY = player.y + deltaY;
-
-    if (
-      newX >= 0 && newX <= BOARD_WIDTH
-        && newY >= 0 && newY <= BOARD_HEIGHT
-        && board[newY][newX] === Piece.Empty
-    ) {
-      setPlayer({
-        x: newX,
-        y: newY,
-      });
-    }
-  }, [player]);
-
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    const newPlayer = { ...game.player };
+
     switch (event.key) {
       case Keys.ArrowLeft:
       case Keys.ArrowUp:
       case Keys.ArrowRight:
       case Keys.ArrowDown:
+        event.preventDefault();
+        newPlayer.moving = true;
+        break;
+      case Keys.Space:
         event.preventDefault();
         break;
       default:
@@ -84,27 +233,55 @@ export default function App() {
 
     switch (event.key) {
       case Keys.ArrowLeft:
-        movePlayer(-1, 0);
+        newPlayer.direction = Direction.Left;
         break;
       case Keys.ArrowUp:
-        movePlayer(0, -1);
+        newPlayer.direction = Direction.Up;
         break;
       case Keys.ArrowRight:
-        movePlayer(1, 0);
+        newPlayer.direction = Direction.Right;
         break;
       case Keys.ArrowDown:
-        movePlayer(0, 1);
+        newPlayer.direction = Direction.Down;
+        break;
+      case Keys.Space:
+        newPlayer.attacking = true;
         break;
       default:
         // do nothing
         break;
     }
-  }, [movePlayer]);
+
+    setGame({ ...game, player: newPlayer });
+  }, [game]);
 
   useEventListener('keydown', handleKeyDown);
 
+  useEventListener('keyup', (event: React.KeyboardEvent) => {
+    const newPlayer = { ...game.player };
+
+    switch (event.key) {
+      case Keys.ArrowLeft:
+      case Keys.ArrowUp:
+      case Keys.ArrowRight:
+      case Keys.ArrowDown:
+        event.preventDefault();
+        newPlayer.moving = false;
+        break;
+      case Keys.Space:
+        event.preventDefault();
+        newPlayer.attacking = false;
+        break;
+      default:
+        // do nothing
+        break;
+    }
+
+    setGame({ ...game, player: newPlayer });
+  });
+
   useEffect(() => {
-    const boardCopy = _.cloneDeep(board);
+    const boardCopy = _.cloneDeep(game.board);
 
     jimp.read(boardFileData).then((image) => {
       for (let x = 0; x < image.bitmap.width; x += 1) {
@@ -121,30 +298,18 @@ export default function App() {
         }
       }
 
-      setBoard(boardCopy);
+      setGame({
+        ...game,
+        board: boardCopy,
+      });
     });
   }, []);
 
   useEffect(() => {
-    const context = viewCanvasRef.current.getContext('2d');
+    render(viewCanvasRef.current, game);
+  }, [game]);
 
-    // clear buffer
-    context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // render board
-    context.fillStyle = 'black';
-    board.forEach((row, y) => {
-      row.forEach((piece, x) => {
-        if (piece === Piece.Wall) {
-          context.fillRect(x * PIECE_WIDTH, y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
-        }
-      });
-    });
-
-    // render player
-    context.fillStyle = 'green';
-    context.fillRect(player.x * PIECE_WIDTH, player.y * PIECE_HEIGHT, PIECE_WIDTH, PIECE_HEIGHT);
-  }, [player, board]);
+  useInterval(() => setGame(tick(game)), 100);
 
   return (
     <div className={c.container}>
